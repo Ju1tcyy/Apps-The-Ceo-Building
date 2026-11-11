@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="ceoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#142D4E" />
+      <stop offset="100%" stop-color="#0B1A2D" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#E5C78D" />
+      <stop offset="100%" stop-color="#C6A66B" />
+    </linearGradient>
+  </defs>
+  <!-- Background Navy Rounded Container -->
+  <rect width="512" height="512" rx="112" fill="url(#ceoGrad)" />
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#C6A66B" stroke-width="6" stroke-opacity="0.35" />
+
+  <!-- The CEO Building Icon Tower Graphics -->
+  <g fill="none" stroke="url(#goldGrad)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left Wing -->
+    <path d="M 120 380 L 120 230 L 190 190 L 190 380" />
+    <line x1="155" y1="240" x2="155" y2="350" stroke-width="12" stroke-opacity="0.6" />
+
+    <!-- Center High-Rise Tower -->
+    <path d="M 190 380 L 190 130 L 256 90 L 322 130 L 322 380" />
+    <line x1="256" y1="120" x2="256" y2="380" stroke-width="14" stroke-opacity="0.8" />
+    <line x1="223" y1="160" x2="223" y2="350" stroke-width="10" stroke-opacity="0.5" />
+    <line x1="289" y1="160" x2="289" y2="350" stroke-width="10" stroke-opacity="0.5" />
+
+    <!-- Right Wing -->
+    <path d="M 322 380 L 322 190 L 392 230 L 392 380" />
+    <line x1="357" y1="240" x2="357" y2="350" stroke-width="12" stroke-opacity="0.6" />
+
+    <!-- Base Foundation Line -->
+    <line x1="90" y1="380" x2="422" y2="380" stroke-width="22" stroke="url(#goldGrad)" />
+  </g>
+
+  <!-- Star / Accent Crown -->
+  <circle cx="256" cy="65" r="10" fill="#E5C78D" />
+</svg>

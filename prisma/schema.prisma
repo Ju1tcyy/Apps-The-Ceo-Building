@@ -1,0 +1,576 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// 1. IDENTITY & RBAC
+// ==========================================
+
+model User {
+  id            String    @id @default(cuid())
+  employeeCode  String?   @map("employee_code")
+  name          String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  roles               UserRole[]
+  engineerProfile     EngineerProfile?
+  createdRosters      ShiftRoster[]        @relation("RosterCreator")
+  assignedRosters     ShiftRoster[]        @relation("EngineerRoster")
+  attendances         AttendanceRecord[]
+  assignedTickets     Ticket[]             @relation("AssignedEngineer")
+  createdTickets      Ticket[]             @relation("TicketCreator")
+  ticketEvents        TicketEvent[]
+  ticketAttachments   TicketAttachment[]
+  createdTasks        DailyTask[]          @relation("TaskCreator")
+  assignedTasks       DailyTask[]          @relation("AssignedTaskEngineer")
+  handoversGiven      ShiftHandover[]      @relation("HandoverFrom")
+  handoversReceived   ShiftHandover[]      @relation("HandoverTo")
+  inventoryActions    InventoryTransaction[] @relation("InventoryCreator")
+  inventoryApprovals  InventoryTransaction[] @relation("InventoryApprover")
+  ticketConsumables   TicketConsumable[]
+  startedStocktakes   StocktakeSession[]   @relation("StocktakeStarter")
+  approvedStocktakes  StocktakeSession[]   @relation("StocktakeApprover")
+  createdInvoices     Invoice[]            @relation("InvoiceCreator")
+  recordedPayments    InvoicePayment[]
+  approvalRequests    ApprovalRequest[]    @relation("ApprovalRequester")
+  approvalDecisions   ApprovalRequest[]    @relation("ApprovalDecider")
+  executedAiActions   AiActionLog[]
+  weeklyReports       WeeklyReport[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  code        String   @unique // direksi, spv, manager, accounting, engineer
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  description String?
+
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ==========================================
+// 2. MASTER DATA
+// ==========================================
+
+model Tenant {
+  id           String    @id @default(cuid())
+  tenantName   String    @map("tenant_name")
+  contactName  String    @map("contact_name")
+  contactPhone String    @map("contact_phone")
+  contactEmail String    @map("contact_email")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  units    Unit[]
+  tickets  Ticket[]
+  invoices Invoice[]
+
+  @@map("tenants")
+}
+
+model Unit {
+  id           String    @id @default(cuid())
+  tenantId     String?   @map("tenant_id")
+  unitCode     String    @unique @map("unit_code")
+  floor        String
+  qrTokenHash  String    @unique @map("qr_token_hash")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant?   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tickets  Ticket[]
+  invoices Invoice[]
+
+  @@map("units")
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  name      String
+  floor     String
+  areaType  String   @map("area_type") // ceo_area, lobby, tenant_unit, corridor, mechanical_room, etc.
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  clockInAttendances  AttendanceRecord[] @relation("ClockInLocation")
+  clockOutAttendances AttendanceRecord[] @relation("ClockOutLocation")
+  tickets             Ticket[]
+  dailyTasks          DailyTask[]
+
+  @@map("locations")
+}
+
+model EngineerProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  employeeCode String   @unique @map("employee_code")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("engineer_profiles")
+}
+
+// ==========================================
+// 3. ENGINEERING
+// ==========================================
+
+model ShiftDefinition {
+  id              String   @id @default(cuid())
+  name            String   // Shift 1, Shift 2, Shift 3
+  startTime       String   @map("start_time") // e.g. "06:00"
+  endTime         String   @map("end_time")   // e.g. "14:00"
+  crossesMidnight Boolean  @default(false) @map("crosses_midnight")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  rosters ShiftRoster[]
+
+  @@map("shift_definitions")
+}
+
+model ShiftRoster {
+  id                String   @id @default(cuid())
+  engineerUserId    String   @map("engineer_user_id")
+  shiftDefinitionId String   @map("shift_definition_id")
+  shiftDate         String   @map("shift_date") // YYYY-MM-DD
+  createdBy         String   @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  engineer        User            @relation("EngineerRoster", fields: [engineerUserId], references: [id], onDelete: Cascade)
+  shiftDefinition ShiftDefinition @relation(fields: [shiftDefinitionId], references: [id], onDelete: Restrict)
+  creator         User            @relation("RosterCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  attendances     AttendanceRecord[]
+
+  @@unique([engineerUserId, shiftDate]) // Prevent overlapping rosters for same engineer on same date
+  @@map("shift_rosters")
+}
+
+model AttendanceRecord {
+  id                    String    @id @default(cuid())
+  engineerUserId        String    @map("engineer_user_id")
+  shiftRosterId         String?   @map("shift_roster_id")
+  clockInAt             DateTime  @map("clock_in_at")
+  clockInPhotoPath      String    @map("clock_in_photo_path")
+  clockInQrLocationId   String    @map("clock_in_qr_location_id")
+  clockOutAt            DateTime? @map("clock_out_at")
+  clockOutPhotoPath     String?   @map("clock_out_photo_path")
+  clockOutQrLocationId  String?   @map("clock_out_qr_location_id")
+  consentVersion        String    @default("v1.0-pdp-30d") @map("consent_version")
+  verificationStatus    String    @default("VALID") @map("verification_status") // VALID, FLAGGED, REJECTED
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  engineer         User      @relation(fields: [engineerUserId], references: [id], onDelete: Cascade)
+  shiftRoster      ShiftRoster? @relation(fields: [shiftRosterId], references: [id], onDelete: SetNull)
+  clockInLocation  Location  @relation("ClockInLocation", fields: [clockInQrLocationId], references: [id], onDelete: Restrict)
+  clockOutLocation Location? @relation("ClockOutLocation", fields: [clockOutQrLocationId], references: [id], onDelete: SetNull)
+
+  @@map("attendance_records")
+}
+
+model Ticket {
+  id                 String    @id @default(cuid())
+  ticketNumber       String    @unique @map("ticket_number") // e.g. TC-20261108-0001
+  source             String    @default("internal") // public_form, qr_form, phone, whatsapp, internal
+  requesterName      String    @map("requester_name")
+  requesterContact   String    @map("requester_contact")
+  tenantId           String?   @map("tenant_id")
+  unitId             String?   @map("unit_id")
+  locationId         String    @map("location_id")
+  category           String    // AC, Listrik, Plumbing, Sipil, Fasilitas, dll.
+  description        String
+  priority           String    @default("MEDIUM") // LOW, MEDIUM, HIGH, EMERGENCY
+  status             String    @default("OPEN") // OPEN, ASSIGNED, IN_PROGRESS, DONE, VERIFIED
+  assignedEngineerId String?   @map("assigned_engineer_id")
+  responseDueAt      DateTime? @map("response_due_at")
+  firstResponseAt    DateTime? @map("first_response_at")
+  startedAt          DateTime? @map("started_at")
+  doneAt             DateTime? @map("done_at")
+  verifiedAt         DateTime? @map("verified_at")
+  createdBy          String?   @map("created_by") // nullable for public submission
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  tenant           Tenant?            @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  unit             Unit?              @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  location         Location           @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  assignedEngineer User?              @relation("AssignedEngineer", fields: [assignedEngineerId], references: [id], onDelete: SetNull)
+  creator          User?              @relation("TicketCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  events           TicketEvent[]
+  attachments      TicketAttachment[]
+  consumables      TicketConsumable[]
+  handovers        ShiftHandover[]
+
+  @@map("tickets")
+}
+
+model TicketEvent {
+  id            String   @id @default(cuid())
+  ticketId      String   @map("ticket_id")
+  actorUserId   String?  @map("actor_user_id")
+  eventType     String   @map("event_type") // STATUS_CHANGE, ASSIGNMENT, ESCALATION, COMMENT, etc.
+  previousValue String?  @map("previous_value")
+  newValue      String?  @map("new_value")
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@map("ticket_events")
+}
+
+model TicketAttachment {
+  id         String   @id @default(cuid())
+  ticketId   String   @map("ticket_id")
+  uploadedBy String?  @map("uploaded_by")
+  filePath   String   @map("file_path")
+  fileType   String   @map("file_type")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploader User?  @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@map("ticket_attachments")
+}
+
+model DailyTask {
+  id                 String    @id @default(cuid())
+  title              String
+  description        String?
+  locationId         String    @map("location_id")
+  assignedEngineerId String?   @map("assigned_engineer_id")
+  dueAt              DateTime? @map("due_at")
+  priority           String    @default("MEDIUM") // LOW, MEDIUM, HIGH
+  status             String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  createdBy          String    @map("created_by")
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  location         Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  assignedEngineer User?    @relation("AssignedTaskEngineer", fields: [assignedEngineerId], references: [id], onDelete: SetNull)
+  creator          User     @relation("TaskCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@map("daily_tasks")
+}
+
+model ShiftHandover {
+  id               String   @id @default(cuid())
+  ticketId         String   @map("ticket_id")
+  fromEngineerId   String   @map("from_engineer_id")
+  toEngineerId     String?  @map("to_engineer_id")
+  conditionSummary String   @map("condition_summary")
+  completedWork    String   @map("completed_work")
+  remainingWork    String   @map("remaining_work")
+  riskNotes        String?  @map("risk_notes")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  ticket       Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fromEngineer User   @relation("HandoverFrom", fields: [fromEngineerId], references: [id], onDelete: Restrict)
+  toEngineer   User?  @relation("HandoverTo", fields: [toEngineerId], references: [id], onDelete: SetNull)
+
+  @@map("shift_handovers")
+}
+
+// ==========================================
+// 4. INVENTORY
+// ==========================================
+
+model InventoryItem {
+  id              String   @id @default(cuid())
+  itemCode        String   @unique @map("item_code")
+  name            String
+  category        String   // Lampu, Sealant, Pipa, Kelistrikan, dll.
+  unitOfMeasure   String   @map("unit_of_measure") // pcs, roll, meter, can, dll.
+  quantityOnHand  Int      @default(0) @map("quantity_on_hand")
+  minimumQuantity Int      @default(0) @map("minimum_quantity")
+  storageLocation String?  @map("storage_location")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  transactions   InventoryTransaction[]
+  consumables    TicketConsumable[]
+  stocktakeLines StocktakeLine[]
+
+  @@map("inventory_items")
+}
+
+model InventoryTransaction {
+  id              String   @id @default(cuid())
+  inventoryItemId String   @map("inventory_item_id")
+  transactionType String   @map("transaction_type") // OPENING_BALANCE, STOCK_IN, CONSUMPTION, ADJUSTMENT, STOCK_OPNAME, REVERSAL
+  quantityDelta   Int      @map("quantity_delta") // signed integer: positive for in, negative for consumption
+  referenceType   String?  @map("reference_type") // ticket, stocktake, manual
+  referenceId     String?  @map("reference_id")
+  reason          String?
+  createdBy       String   @map("created_by")
+  approvedBy      String?  @map("approved_by")
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  item       InventoryItem     @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  creator    User              @relation("InventoryCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  approver   User?             @relation("InventoryApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  consumable TicketConsumable?
+
+  @@map("inventory_transactions")
+}
+
+model TicketConsumable {
+  id                     String   @id @default(cuid())
+  ticketId               String   @map("ticket_id")
+  inventoryItemId        String   @map("inventory_item_id")
+  quantityUsed           Int      @map("quantity_used")
+  inventoryTransactionId String?  @unique @map("inventory_transaction_id")
+  recordedBy             String   @map("recorded_by")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  ticket      Ticket                @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  item        InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  transaction InventoryTransaction? @relation(fields: [inventoryTransactionId], references: [id], onDelete: SetNull)
+  recorder    User                  @relation(fields: [recordedBy], references: [id], onDelete: Restrict)
+
+  @@map("ticket_consumables")
+}
+
+model StocktakeSession {
+  id          String    @id @default(cuid())
+  status      String    @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
+  startedBy   String    @map("started_by")
+  approvedBy  String?   @map("approved_by")
+  startedAt   DateTime  @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  starter  User            @relation("StocktakeStarter", fields: [startedBy], references: [id], onDelete: Restrict)
+  approver User?           @relation("StocktakeApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  lines    StocktakeLine[]
+
+  @@map("stocktake_sessions")
+}
+
+model StocktakeLine {
+  id                 String  @id @default(cuid())
+  stocktakeSessionId String  @map("stocktake_session_id")
+  inventoryItemId    String  @map("inventory_item_id")
+  systemQuantity     Int     @map("system_quantity")
+  physicalQuantity   Int     @map("physical_quantity")
+  variance           Int
+  note               String?
+
+  session StocktakeSession @relation(fields: [stocktakeSessionId], references: [id], onDelete: Cascade)
+  item    InventoryItem    @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@map("stocktake_lines")
+}
+
+// ==========================================
+// 5. BILLING
+// ==========================================
+
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @unique @map("invoice_number")
+  tenantId      String    @map("tenant_id")
+  unitId        String?   @map("unit_id")
+  billingPeriod String    @map("billing_period") // e.g. "2026-11"
+  invoiceDate   DateTime  @map("invoice_date")
+  dueDate       DateTime  @map("due_date")
+  amount        Int
+  paidAmount    Int       @default(0) @map("paid_amount")
+  status        String    @default("UNPAID") // DRAFT, ISSUED, UNPAID, PARTIALLY_PAID, PAID, OVERDUE
+  documentPath  String?   @map("document_path")
+  notes         String?
+  createdBy     String    @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  unit      Unit?             @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  creator   User              @relation("InvoiceCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  payments  InvoicePayment[]
+  reminders InvoiceReminder[]
+
+  @@map("invoices")
+}
+
+model InvoicePayment {
+  id               String   @id @default(cuid())
+  invoiceId        String   @map("invoice_id")
+  amount           Int
+  paymentDate      DateTime @map("payment_date")
+  paymentReference String?  @map("payment_reference")
+  recordedBy       String   @map("recorded_by")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  invoice  Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  recorder User    @relation(fields: [recordedBy], references: [id], onDelete: Restrict)
+
+  @@map("invoice_payments")
+}
+
+model InvoiceReminder {
+  id                String    @id @default(cuid())
+  invoiceId         String    @map("invoice_id")
+  scheduledAt       DateTime  @map("scheduled_at")
+  reminderStage     String    @map("reminder_stage") // H-14, H-7, H-0, H+1, H+3, H+7
+  channel           String    @default("IN_APP") // IN_APP, WHATSAPP_OFFICIAL
+  recipient         String
+  status            String    @default("PENDING") // PENDING, SENT, FAILED, CANCELLED
+  providerReference String?   @map("provider_reference")
+  sentAt            DateTime? @map("sent_at")
+  errorMessage      String?   @map("error_message")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_reminders")
+}
+
+// ==========================================
+// 6. AI & APPROVAL
+// ==========================================
+
+model AiRecommendation {
+  id             String   @id @default(cuid())
+  module         String   // engineering, inventory, billing
+  contextType    String   @map("context_type")
+  contextId      String   @map("context_id")
+  recommendation String
+  proposedAction String   @map("proposed_action")
+  riskLevel      String   @default("LEVEL_1") @map("risk_level") // LEVEL_1, LEVEL_2, LEVEL_3
+  status         String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, EXECUTED
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  approvalRequests ApprovalRequest[]
+  actionLogs       AiActionLog[]
+
+  @@map("ai_recommendations")
+}
+
+model ApprovalRequest {
+  id                 String    @id @default(cuid())
+  aiRecommendationId String?   @map("ai_recommendation_id")
+  actionType         String    @map("action_type") // STOCK_ADJUSTMENT, INVOICE_MODIFY, TICKET_PRIORITY, REASSIGNMENT
+  targetType         String    @map("target_type")
+  targetId           String    @map("target_id")
+  requestedBy        String    @map("requested_by")
+  approvedBy         String?   @map("approved_by")
+  status             String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  decisionNote       String?   @map("decision_note")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  decidedAt          DateTime? @map("decided_at")
+
+  recommendation AiRecommendation? @relation(fields: [aiRecommendationId], references: [id], onDelete: SetNull)
+  requester      User              @relation("ApprovalRequester", fields: [requestedBy], references: [id], onDelete: Restrict)
+  decider        User?             @relation("ApprovalDecider", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@map("approval_requests")
+}
+
+model AiActionLog {
+  id                String   @id @default(cuid())
+  recommendationId  String   @map("recommendation_id")
+  actionType        String   @map("action_type")
+  executionStatus   String   @map("execution_status")
+  executedBy        String   @map("executed_by")
+  executedAt        DateTime @default(now()) @map("executed_at")
+  reversalReference String?  @map("reversal_reference")
+
+  recommendation AiRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  executor       User             @relation(fields: [executedBy], references: [id], onDelete: Restrict)
+
+  @@map("ai_action_logs")
+}
+
+// ==========================================
+// 7. REPORTS & AUDIT TRAIL
+// ==========================================
+
+model WeeklyReport {
+  id           String   @id @default(cuid())
+  periodStart  DateTime @map("period_start")
+  periodEnd    DateTime @map("period_end")
+  generatedBy  String   @map("generated_by")
+  generatedAt  DateTime @default(now()) @map("generated_at")
+  exportStatus String   @default("GENERATED") @map("export_status")
+
+  generator User @relation(fields: [generatedBy], references: [id], onDelete: Restrict)
+
+  @@map("weekly_reports")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?  @map("actor_user_id")
+  actorRole   String   @map("actor_role")
+  action      String   // LOGIN, LOGOUT, TICKET_CREATE, STATUS_CHANGE, ROSTER_CREATE, ATTENDANCE_CLOCK, EXPORT_REPORT, etc.
+  module      String   // auth, engineering, inventory, billing, ai, report, user
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  beforeJson  String?  @map("before_json")
+  afterJson   String?  @map("after_json")
+  source      String   @default("human") // human, system, ai
+  requestId   String?  @map("request_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
